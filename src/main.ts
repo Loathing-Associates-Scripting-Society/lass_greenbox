@@ -1,5 +1,14 @@
-import { Familiar, getPermedSkills, print, toInt, toSkill, visitUrl } from "kolmafia";
-import { have } from "libram";
+import {
+  Familiar,
+  getPermedSkills,
+  myId,
+  print,
+  toFamiliar,
+  toInt,
+  toSkill,
+  visitUrl,
+} from "kolmafia";
+import { $familiar, have } from "libram";
 
 /**
  * Interface for the JSON output.
@@ -41,20 +50,47 @@ export function checkSkills(): SnapshotOutput {
   return skillOutput;
 }
 
+export enum FamiliarReport {
+  NONE = 0,
+  HATCHLING = 1 << 0,
+  TERRARIUM = 1 << 1,
+  NINETY = 1 << 2,
+  ONE_HUNDRED = 1 << 3,
+}
+
 /** Generates an object with a list of familiars.
- * @returns large numeric list of familiars by fam ID
+ * @returns bitwise integer for every possible familiar indicating whether you own the hatching/the familiar in your terrarium and whether you have completed 90 or 100% runs with it.
  */
 
 export function checkFamiliars(): SnapshotOutput {
-  const familiarsInTerrarium = new Set<number>();
-  // const familiarHatchlings = new Set<number>();
+  const familiars = new Set<number>();
+  const ascensionHistory =
+    visitUrl(`ascensionhistory.php?back=self&who=${myId()}`, false) +
+    visitUrl(`ascensionhistory.php?back=self&prens13=1&who=${myId()}`);
+  const famList = Familiar.all();
 
-  for (const fam of Familiar.all()) {
-    if (have(fam)) familiarsInTerrarium.add(toInt(fam));
+  const lastFam = toInt(famList[famList.length - 1]);
+
+  for (let i = 0; i < lastFam; i++) {
+    const fam = toFamiliar(i + 1);
+    if (fam === $familiar`none`) {
+      familiars.add(0);
+      continue;
+    }
+    const searchTerm = new RegExp(`alt="${fam.name} .([0-9.]+)..`);
+    const matches = [...ascensionHistory.matchAll(searchTerm)];
+    const maxPercentage = toInt(matches.sort(([, b], [, y]) => toInt(y) - toInt(b))[0][1]); //sorts list of fam percentages into descending order
+
+    const familiarState =
+      (have(fam.hatchling) ? FamiliarReport.HATCHLING : FamiliarReport.NONE) |
+      (have(fam) ? FamiliarReport.TERRARIUM : 0) |
+      (maxPercentage >= 90 ? FamiliarReport.NINETY : 0) |
+      (maxPercentage >= 100 ? FamiliarReport.ONE_HUNDRED : 0);
+    familiars.add(familiarState);
   }
 
   const famOutput = {
-    familiars: Array.from(familiarsInTerrarium),
+    familiars: Array.from(familiars),
   };
 
   return famOutput;
@@ -79,7 +115,7 @@ export function checkTrophies(): SnapshotOutput {
 
 export function checkTattoos(): SnapshotOutput {
   const tattoosUnlocked = new Set<string>();
-  const page = visitUrl("account_tattoos.php");
+  const page: string = visitUrl("account_tattoos.php");
   const tats = page.split(`Tattoo: `).slice(1); //gives an array where each item in the array starts with the tattoo name
   for (let i = 0; i < tats.length; i = i + 2) {
     //Tattoo page lists every tattoo twice, hence only doing evens
